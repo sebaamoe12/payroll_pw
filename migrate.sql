@@ -182,7 +182,7 @@ VALUES (
   'seed-user-001',
   'admin@demo.com',
   'Admin Démo',
-  '$2a$12$LJ3m4ys3Lk0TSwHnbfOMiOXPm1Qlq5GzGq0B7Y1q2J3k4L5M6N7O8',
+  '$2b$12$xJuiUuIaN4Nv6f/l.gg9RePOLLZv.6dB3rqP3Lhuyyby36VzktjfO',
   'ADMIN',
   'seed-company-001',
   NOW()
