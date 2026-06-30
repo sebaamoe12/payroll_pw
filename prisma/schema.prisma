@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  VIEWER
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum AdvanceType {
+  SALARY
+  EMERGENCY
+  MEDICAL
+  OTHER
+}
+
+enum AdvanceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  PAID
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  APPROVED
+  PAID
+  PENDING
+}
+
+enum PayrollRecordStatus {
+  PENDING
+  PAID
+}
+
+model Company {
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  stripeCustomerId  String?
+  subscriptionStatus String  @default("active")
+  createdAt         DateTime @default(now())
+
+  users             User[]
+  employees         Employee[]
+  salaryAdvances    SalaryAdvance[]
+  payrollRuns       PayrollRun[]
+  employeePayrolls  EmployeePayroll[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  password  String?
+  role      Role     @default(VIEWER)
+  companyId String
+  createdAt DateTime @default(now())
+
+  company           Company            @relation(fields: [companyId], references: [id])
+  salaryAdvances    SalaryAdvance[]    @relation("ApprovedBy")
+  payrollRuns       PayrollRun[]       @relation("ProcessedBy")
+  accounts          Account[]
+  sessions          Session[]
+  employeePayrolls  EmployeePayroll[]  @relation("PaidBy")
+}
+
+model Employee {
+  id                  String         @id @default(cuid())
+  firstName           String
+  lastName            String
+  email               String?
+  position            String
+  baseSalary          Decimal        @db.Decimal(10, 2)
+  status              EmployeeStatus @default(ACTIVE)
+  startDate           DateTime
+  phone               String?
+  monthlyAdvanceLimit Decimal        @default(50000) @db.Decimal(10, 2)
+  payDay              Int            @default(1)
+  companyId           String
+  createdAt           DateTime       @default(now())
+
+  company            Company            @relation(fields: [companyId], references: [id])
+  salaryAdvances     SalaryAdvance[]
+  payrollRecords     PayrollRecord[]
+  employeePayrolls   EmployeePayroll[]
+}
+
+model SalaryAdvance {
+  id                       String         @id @default(cuid())
+  amount                   Decimal        @db.Decimal(10, 2)
+  reason                   String?
+  date                     DateTime
+  type                     AdvanceType    @default(SALARY)
+  status                   AdvanceStatus  @default(PENDING)
+  employeeId               String
+  companyId                String
+  approvedById             String?
+  approvedAt               DateTime?
+  appliedInPayrollId       String?
+  appliedInEmployeePayrollId String?
+  createdAt                DateTime       @default(now())
+
+  employee                 Employee       @relation(fields: [employeeId], references: [id])
+  company                  Company        @relation(fields: [companyId], references: [id])
+  approvedBy               User?          @relation("ApprovedBy", fields: [approvedById], references: [id])
+  appliedInPayrollRun      PayrollRun?    @relation("AppliedAdvances", fields: [appliedInPayrollId], references: [id])
+  appliedInEmployeePayroll EmployeePayroll? @relation("AppliedAdvances", fields: [appliedInEmployeePayrollId], references: [id])
+}
+
+model PayrollRun {
+  id           String            @id @default(cuid())
+  companyId    String
+  periodMonth  Int
+  periodYear   Int
+  status       PayrollRunStatus  @default(DRAFT)
+  totalAmount  Decimal           @default(0) @db.Decimal(14, 2)
+  processedBy  String?
+  createdAt    DateTime          @default(now())
+
+  company      Company           @relation(fields: [companyId], references: [id])
+  processedByUser User?          @relation("ProcessedBy", fields: [processedBy], references: [id])
+  records      PayrollRecord[]
+  salaryAdvances SalaryAdvance[] @relation("AppliedAdvances")
+}
+
+model PayrollRecord {
+  id             String              @id @default(cuid())
+  payrollRunId   String
+  employeeId     String
+  baseSalary     Decimal             @db.Decimal(10, 2)
+  totalAdvances  Decimal             @default(0) @db.Decimal(10, 2)
+  netSalary      Decimal             @db.Decimal(10, 2)
+  deductions     Decimal             @default(0) @db.Decimal(10, 2)
+  status         PayrollRecordStatus @default(PENDING)
+  createdAt      DateTime            @default(now())
+
+  payrollRun     PayrollRun          @relation(fields: [payrollRunId], references: [id])
+  employee       Employee            @relation(fields: [employeeId], references: [id])
+}
+
+model EmployeePayroll {
+  id           String              @id @default(cuid())
+  employeeId   String
+  companyId    String
+  periodMonth  Int
+  periodYear   Int
+  baseSalary   Decimal             @db.Decimal(10, 2)
+  totalAdvances Decimal            @default(0) @db.Decimal(10, 2)
+  netSalary    Decimal             @db.Decimal(10, 2)
+  deductions   Decimal             @default(0) @db.Decimal(10, 2)
+  status       PayrollRecordStatus @default(PENDING)
+  paidById     String?
+  paidAt       DateTime?
+  createdAt    DateTime            @default(now())
+
+  employee     Employee            @relation(fields: [employeeId], references: [id])
+  company      Company             @relation(fields: [companyId], references: [id])
+  paidBy       User?               @relation("PaidBy", fields: [paidById], references: [id])
+  salaryAdvances SalaryAdvance[]   @relation("AppliedAdvances")
+
+  @@unique([employeeId, periodMonth, periodYear])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
