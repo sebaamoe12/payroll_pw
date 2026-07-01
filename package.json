@@ -2,6 +2,7 @@
   "name": "payroll-pw",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "npm@11.4.2",
   "scripts": {
     "dev": "next dev --webpack",
     "build": "next build --webpack",
