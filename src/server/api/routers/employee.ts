@@ -1,18 +1,20 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../middleware";
+import type { Employee } from "@/server/db/types";
 
 export const employeeRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.prisma.employee.findMany({
-      where: { companyId: ctx.user.companyId },
-      orderBy: { createdAt: "desc" },
-    });
+    return ctx.query<Employee>(
+      'SELECT * FROM "Employee" WHERE "companyId" = $1 ORDER BY "createdAt" DESC',
+      [ctx.user.companyId]
+    );
   }),
 
   getById: protectedProcedure.input(z.string()).query(async ({ ctx, input }) => {
-    return ctx.prisma.employee.findFirst({
-      where: { id: input, companyId: ctx.user.companyId },
-    });
+    return ctx.queryOne<Employee>(
+      'SELECT * FROM "Employee" WHERE id = $1 AND "companyId" = $2',
+      [input, ctx.user.companyId]
+    );
   }),
 
   create: adminProcedure
@@ -30,15 +32,17 @@ export const employeeRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.employee.create({
-        data: {
-          ...input,
-          baseSalary: input.baseSalary,
-          monthlyAdvanceLimit: input.monthlyAdvanceLimit ?? 50000,
-          startDate: new Date(input.startDate),
-          companyId: ctx.user.companyId,
-        },
-      });
+      const id = `emp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      return ctx.queryOne<Employee>(
+        `INSERT INTO "Employee" (id, "firstName", "lastName", email, position, "baseSalary", "startDate", phone, "monthlyAdvanceLimit", "payDay", "companyId")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        [
+          id, input.firstName, input.lastName, input.email ?? null,
+          input.position, input.baseSalary, new Date(input.startDate).toISOString(),
+          input.phone ?? null, input.monthlyAdvanceLimit ?? 50000, input.payDay ?? 1,
+          ctx.user.companyId
+        ]
+      );
     }),
 
   update: adminProcedure
@@ -58,19 +62,33 @@ export const employeeRouter = router({
     )
     .mutation(async ({ ctx, input }) => {
       const { id, ...data } = input;
-      return ctx.prisma.employee.update({
-        where: { id, companyId: ctx.user.companyId },
-        data: {
-          ...data,
-          ...(data.baseSalary ? { baseSalary: data.baseSalary } : {}),
-          ...(data.monthlyAdvanceLimit ? { monthlyAdvanceLimit: data.monthlyAdvanceLimit } : {}),
-        },
-      });
+      const updates: string[] = [];
+      const params: any[] = [];
+      let idx = 1;
+      for (const [key, value] of Object.entries(data)) {
+        if (value === undefined) continue;
+        if (key === "baseSalary" || key === "monthlyAdvanceLimit") {
+          updates.push(`"${key}" = $${idx}`);
+          params.push(value);
+        } else if (key === "phone" || key === "email") {
+          updates.push(`"${key}" = $${idx}`);
+          params.push(value ?? null);
+        } else {
+          updates.push(`"${key}" = $${idx}`);
+          params.push(value);
+        }
+        idx++;
+      }
+      if (updates.length === 0) return ctx.queryOne<Employee>('SELECT * FROM "Employee" WHERE id = $1', [id]);
+      params.push(id, ctx.user.companyId);
+      return ctx.queryOne<Employee>(
+        `UPDATE "Employee" SET ${updates.join(", ")} WHERE id = $${idx} AND "companyId" = $${idx + 1} RETURNING *`,
+        params
+      );
     }),
 
   delete: adminProcedure.input(z.string()).mutation(async ({ ctx, input }) => {
-    return ctx.prisma.employee.delete({
-      where: { id: input, companyId: ctx.user.companyId },
-    });
+    await ctx.query('DELETE FROM "Employee" WHERE id = $1 AND "companyId" = $2', [input, ctx.user.companyId]);
+    return { success: true };
   }),
 });

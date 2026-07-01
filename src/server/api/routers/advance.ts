@@ -1,13 +1,26 @@
 import { z } from "zod";
 import { router, protectedProcedure, adminProcedure } from "../middleware";
+import type { SalaryAdvance, Employee, User } from "@/server/db/types";
+
+type AdvanceWithRelations = SalaryAdvance & {
+  employee: Employee;
+  approvedBy: Pick<User, "id" | "name" | "email"> | null;
+};
 
 export const advanceRouter = router({
   list: protectedProcedure.query(async ({ ctx }) => {
-    return ctx.prisma.salaryAdvance.findMany({
-      where: { companyId: ctx.user.companyId },
-      include: { employee: true, approvedBy: { select: { id: true, name: true, email: true } } },
-      orderBy: { createdAt: "desc" },
-    });
+    const rows = await ctx.query<AdvanceWithRelations>(
+      `SELECT sa.*,
+        (SELECT row_to_json(e.*) FROM "Employee" e WHERE e.id = sa."employeeId") as employee,
+        (SELECT CASE WHEN sa."approvedById" IS NOT NULL THEN
+          json_build_object('id', u.id, 'name', u.name, 'email', u.email)
+        END FROM "User" u WHERE u.id = sa."approvedById") as "approvedBy"
+      FROM "SalaryAdvance" sa
+      WHERE sa."companyId" = $1
+      ORDER BY sa."createdAt" DESC`,
+      [ctx.user.companyId]
+    );
+    return rows;
   }),
 
   create: protectedProcedure
@@ -21,36 +34,35 @@ export const advanceRouter = router({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.prisma.salaryAdvance.create({
-        data: {
-          employeeId: input.employeeId,
-          amount: input.amount,
-          reason: input.reason,
-          date: new Date(input.date),
-          type: input.type,
-          companyId: ctx.user.companyId,
-        },
-      });
+      const id = `adv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      return ctx.queryOne<SalaryAdvance>(
+        `INSERT INTO "SalaryAdvance" (id, "employeeId", amount, reason, date, type, "companyId")
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+        [
+          id, input.employeeId, input.amount, input.reason ?? null,
+          new Date(input.date).toISOString(), input.type, ctx.user.companyId
+        ]
+      );
     }),
 
   approve: adminProcedure.input(z.string()).mutation(async ({ ctx, input }) => {
-    return ctx.prisma.salaryAdvance.update({
-      where: { id: input },
-      data: { status: "APPROVED", approvedById: ctx.user.id, approvedAt: new Date() },
-    });
+    return ctx.queryOne<SalaryAdvance>(
+      `UPDATE "SalaryAdvance" SET status = 'APPROVED', "approvedById" = $1, "approvedAt" = $2 WHERE id = $3 RETURNING *`,
+      [ctx.user.id, new Date().toISOString(), input]
+    );
   }),
 
   reject: adminProcedure.input(z.string()).mutation(async ({ ctx, input }) => {
-    return ctx.prisma.salaryAdvance.update({
-      where: { id: input },
-      data: { status: "REJECTED", approvedById: ctx.user.id, approvedAt: new Date() },
-    });
+    return ctx.queryOne<SalaryAdvance>(
+      `UPDATE "SalaryAdvance" SET status = 'REJECTED', "approvedById" = $1, "approvedAt" = $2 WHERE id = $3 RETURNING *`,
+      [ctx.user.id, new Date().toISOString(), input]
+    );
   }),
 
   pay: adminProcedure.input(z.string()).mutation(async ({ ctx, input }) => {
-    return ctx.prisma.salaryAdvance.update({
-      where: { id: input },
-      data: { status: "PAID" },
-    });
+    return ctx.queryOne<SalaryAdvance>(
+      `UPDATE "SalaryAdvance" SET status = 'PAID' WHERE id = $1 RETURNING *`,
+      [input]
+    );
   }),
 });

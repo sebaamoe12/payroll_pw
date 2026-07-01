@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { createPrismaClient } from "@/server/db";
+import { query, queryOne } from "@/server/db";
+import type { Company, User, Employee } from "@/server/db/types";
 
 export const dynamic = "force-dynamic";
 
@@ -14,51 +15,42 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Invalid setup key" }, { status: 401 });
     }
 
-    const prisma = createPrismaClient();
-
-    const existingUser = await prisma.user.findUnique({ where: { email: "admin@demo.com" } });
+    const existingUser = await queryOne<User>('SELECT id FROM "User" WHERE email = $1', ["admin@demo.com"]);
     if (existingUser) {
-      await prisma.$disconnect();
       return NextResponse.json({ message: "Database already seeded" });
     }
 
-    const company = await prisma.company.create({
-      data: { name: "Société Démo", slug: "demo-company" },
-    });
+    const company = await queryOne<Company>(
+      `INSERT INTO "Company" (id, name, slug) VALUES ($1, $2, $3) RETURNING *`,
+      ["seed-company-001", "Société Démo", "demo-company"]
+    );
 
     const hashedPassword = await bcrypt.hash("admin123", 12);
 
-    const user = await prisma.user.create({
-      data: {
-        email: "admin@demo.com",
-        name: "Admin Démo",
-        password: hashedPassword,
-        role: "ADMIN",
-        companyId: company.id,
-      },
-    });
+    const user = await queryOne<User>(
+      `INSERT INTO "User" (id, email, name, password, role, "companyId") VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      ["seed-user-001", "admin@demo.com", "Admin Démo", hashedPassword, "ADMIN", "seed-company-001"]
+    );
 
     const employeesData = [
-      { firstName: "Marie", lastName: "Dupont", position: "Développeur Full Stack", baseSalary: 45000 },
-      { firstName: "Jean", lastName: "Martin", position: "Chef de Projet", baseSalary: 55000 },
-      { firstName: "Sophie", lastName: "Leroy", position: "Designer UX", baseSalary: 38000 },
+      { id: "emp-001", firstName: "Marie", lastName: "Dupont", position: "Développeur Full Stack", baseSalary: 45000 },
+      { id: "emp-002", firstName: "Jean", lastName: "Martin", position: "Chef de Projet", baseSalary: 55000 },
+      { id: "emp-003", firstName: "Sophie", lastName: "Leroy", position: "Designer UX", baseSalary: 38000 },
     ];
 
-    let employees = 0;
     for (const emp of employeesData) {
-      await prisma.employee.create({
-        data: { ...emp, startDate: new Date("2024-01-01"), companyId: company.id },
-      });
-      employees++;
+      await query(
+        `INSERT INTO "Employee" (id, "firstName", "lastName", position, "baseSalary", "startDate", "companyId")
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [emp.id, emp.firstName, emp.lastName, emp.position, emp.baseSalary, new Date("2024-01-01").toISOString(), "seed-company-001"]
+      );
     }
-
-    await prisma.$disconnect();
 
     return NextResponse.json({
       success: true,
-      company: company.id,
-      user: user.email,
-      employees,
+      company: "seed-company-001",
+      user: user!.email,
+      employees: 3,
     });
   } catch (error) {
     console.error("Seed-db error:", error);

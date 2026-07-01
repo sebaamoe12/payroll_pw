@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import prisma from "@/server/db";
+import { query, queryOne } from "@/server/db";
+import type { Company, User } from "@/server/db/types";
 
 export async function POST(request: Request) {
   try {
@@ -10,7 +11,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Champs obligatoires manquants" }, { status: 400 });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
+    const existingUser = await queryOne<User>('SELECT id FROM "User" WHERE email = $1', [email]);
     if (existingUser) {
       return NextResponse.json({ error: "Cet email est déjà utilisé" }, { status: 409 });
     }
@@ -22,23 +23,21 @@ export async function POST(request: Request) {
 
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    const company = await prisma.company.create({
-      data: { name: companyName, slug },
-    });
+    const companyId = `comp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const company = await queryOne<Company>(
+      `INSERT INTO "Company" (id, name, slug) VALUES ($1, $2, $3) RETURNING *`,
+      [companyId, companyName, slug]
+    );
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        name: name || email.split("@")[0],
-        password: hashedPassword,
-        role: "ADMIN",
-        companyId: company.id,
-      },
-    });
+    const userId = `user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const user = await queryOne<User>(
+      `INSERT INTO "User" (id, email, name, password, role, "companyId") VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [userId, email, name || email.split("@")[0], hashedPassword, "ADMIN", companyId]
+    );
 
     return NextResponse.json({
-      user: { id: user.id, email: user.email, name: user.name },
-      company: { id: company.id, name: company.name, slug: company.slug },
+      user: { id: user!.id, email: user!.email, name: user!.name },
+      company: { id: company!.id, name: company!.name, slug: company!.slug },
     });
   } catch (error) {
     console.error("Registration error:", error);

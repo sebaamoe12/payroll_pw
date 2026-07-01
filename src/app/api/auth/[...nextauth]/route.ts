@@ -1,7 +1,8 @@
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
-import { createPrismaClient } from "@/server/db";
+import { queryOne } from "@/server/db";
+import type { User } from "@/server/db/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,13 +20,14 @@ const authOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
-        const prisma = createPrismaClient();
-        const user = await prisma.user.findUnique({ where: { email: credentials.email } });
-        await prisma.$disconnect();
+        const user = await queryOne<User>(
+          'SELECT * FROM "User" WHERE email = $1',
+          [credentials.email]
+        );
         if (!user || !user.password) return null;
         const isValid = await bcrypt.compare(credentials.password, user.password);
         if (!isValid) return null;
-        return { id: user.id, email: user.email, name: user.name, role: user.role as string, companyId: user.companyId };
+        return { id: user.id, email: user.email, name: user.name, role: user.role, companyId: user.companyId };
       },
     }),
   ],

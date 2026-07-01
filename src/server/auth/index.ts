@@ -1,6 +1,5 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "./config";
-import prisma from "../db";
 
 export { authOptions } from "./config";
 export type AuthSession = {
@@ -20,5 +19,3 @@ export async function getAuth(): Promise<AuthSession | null> {
     },
   };
 }
-
-export { default as prisma } from "../db";
